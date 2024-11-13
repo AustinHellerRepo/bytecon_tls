@@ -1,0 +1,15 @@
+[package]
+name = "server_client_bytecon"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytecon = { version = "0.1", features = ["tokio"] }
+tokio = { version = "1", features = ["full"] }
+tokio-rustls = { version = "0.23" }
+rustls = { version = "0.21" }
+rustls-pemfile = { version = "1.0" }
+tempfile = { version = "3" }
+rcgen = { version = "0.13", features = ["pem"] }
+rand = { version = "0.8" }
+thiserror = { version = "1" }
