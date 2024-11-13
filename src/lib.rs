@@ -37,6 +37,7 @@ impl Client {
         Ok(tcp_stream)
     }
     pub async fn send_message<TMessage: ByteConverter, TResponse: ByteConverter>(&self, message: TMessage) -> Result<TResponse, Box<dyn Error>> {
+        todo!("React to the `connect` function not yet being called.");
         todo!("Sign message with client private key");
         todo!("Encrypt signed message with server public key");
     }
