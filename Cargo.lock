@@ -79,9 +79,9 @@ checksum = "79296716171880943b8470b5f8d03aa55eb2e645a4874bdbb28adb49162e012c"
 
 [[package]]
 name = "bytecon"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f97a20b95f18d54d90a872070b5ffcf81d0a487d84bb950da667d497dd03c848"
+checksum = "e8f8c2c7a14e21b6ce018dd8eb6c40a666fec2997d276e8084e1b25c305f98ae"
 dependencies = [
  "paste",
  "rustls 0.21.12",

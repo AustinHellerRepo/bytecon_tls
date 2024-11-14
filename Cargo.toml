@@ -9,8 +9,10 @@ tokio = { version = "1", features = ["full"] }
 tokio-rustls = { version = "0.23" }
 rustls = { version = "0.21" }
 rustls-pemfile = { version = "1.0" }
+thiserror = { version = "1" }
+chrono = { version = "0.4" }
+
+[dev-dependencies]
 tempfile = { version = "3" }
 rcgen = { version = "0.13", features = ["pem"] }
 rand = { version = "0.8" }
-thiserror = { version = "1" }
-chrono = { version = "0.4" }

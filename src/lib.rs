@@ -1,68 +1,86 @@
-use std::{error::Error, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{error::Error, future::Future, marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc};
 use bytecon::{ByteConverter, ByteStreamReaderAsync, ByteStreamWriterAsync};
-use rand::{rngs::StdRng, Rng};
 use tokio::net::{TcpListener, TcpStream};
+use tokio_rustls::{rustls::{Certificate, ClientConfig, PrivateKey, RootCertStore, ServerConfig, ServerName}, TlsAcceptor, TlsConnector, TlsStream};
 
-pub struct Client {
+pub struct ByteConClient<TRequest: ByteConverter, TResponse: ByteConverter> {
     server_address: String,
     server_port: u16,
-    //public_key_file_path: PathBuf,
-    //private_key_file_path: PathBuf,
-    //nonce_generator: StdRng,
-    //server_public_key_file_path: PathBuf,
+    server_public_key_file_path: PathBuf,
+    server_domain: String,
+    phantom_request: PhantomData<TRequest>,
+    phantom_response: PhantomData<TResponse>,
 }
 
-impl Client {
-    pub fn new(server_address: String, server_port: u16) -> Self {
-        //todo!("Setup public and private key");
+impl<TRequest: ByteConverter, TResponse: ByteConverter> ByteConClient<TRequest, TResponse> {
+    pub fn new(server_address: String, server_port: u16, server_public_key_file_path: PathBuf, server_domain: String) -> Self {
         Self {
             server_address,
             server_port,
+            server_public_key_file_path,
+            server_domain,
+            phantom_request: PhantomData::default(),
+            phantom_response: PhantomData::default(),
         }
     }
-    async fn connect(&self) -> Result<TcpStream, Box<dyn Error>> {
-        // TODO keep `self` as a reference and add a mutex for connecting to the server once
-        //let nonce: u128 = self.nonce_generator.gen();
-        //todo!("Sign the nonce with my private key");
+    async fn connect(&self) -> Result<TlsStream<TcpStream>, Box<dyn Error>> {
+        
+        let config = {
+            let cert_file = std::fs::File::open(&self.server_public_key_file_path)?;
+            let mut reader = std::io::BufReader::new(cert_file);
+            let certs = rustls_pemfile::certs(&mut reader)?;
+
+            let mut root_cert_store = RootCertStore::empty();
+            for cert in certs {
+                root_cert_store.add(&Certificate(cert))?;
+            }
+
+            ClientConfig::builder()
+                .with_safe_defaults()
+                .with_root_certificates(root_cert_store)
+                .with_no_client_auth()
+        };
+
+        let connector = TlsConnector::from(Arc::new(config));
         let connecting_address = format!("{}:{}", self.server_address, self.server_port);
         let tcp_stream = TcpStream::connect(connecting_address)
             .await?;
-        //tcp_stream.write_from_byte_converter(&UnencryptedServerRequest::RequestPublicKey {
-        //    client_public_key_bytes,
-        //    signed_payload,
-        //})
-        //    .await?;
-        //let response = tcp_stream.read_to_byte_converter::<ServerResponse>()
-        //    .await?;
+        let server_name = ServerName::try_from(self.server_domain.as_str())?;
+        let tls_stream = connector.connect(server_name, tcp_stream)
+            .await?;
 
-        Ok(tcp_stream)
+        Ok(tls_stream.into())
     }
-    pub async fn send_message<TMessage: ByteConverter, TResponse: ByteConverter>(&self, message: TMessage) -> Result<TResponse, Box<dyn Error>> {
-        //todo!("React to the `connect` function not yet being called.");
-        //todo!("Sign message with client private key");
-        //todo!("Encrypt signed message with server public key");
+    pub async fn send_message(&self, message: TRequest) -> Result<TResponse, Box<dyn Error>> {
         let server_request = ServerRequest::SendMessage {
             server_request: message,
-            bytecon_type_name: String::from(std::any::type_name::<TMessage>()),
         };
-        let mut stream = self.connect()
+        let mut tls_stream = self.connect()
             .await?;
-        stream.write_from_byte_converter(&server_request)
+        tls_stream.write_from_byte_converter(&server_request)
             .await?;
-        let server_response = stream.read_to_byte_converter()
+        let server_response = tls_stream.read_to_byte_converter::<ServerResponse<TResponse>>()
             .await?;
-        Ok(server_response)
+        match server_response {
+            ServerResponse::SentMessage {
+                server_response
+            } => {
+                Ok(server_response)
+            },
+            _ => {
+                Err(ServerClientByteConError::UnexpectedServerResponse {
+                    server_request: String::from(std::any::type_name::<TRequest>()),
+                    server_response: String::from(std::any::type_name::<TResponse>()),
+                }.into())
+            }
+        }
     }
 }
 
+#[derive(Debug)]
 enum ServerRequest<TServerRequest: ByteConverter> {
     SendMessage {
         server_request: TServerRequest,
-        bytecon_type_name: String,
-    },
-    RequestPublicKey {
-        client_public_key_bytes: Vec<u8>,
-        signed_payload: Vec<u8>,
     },
 }
 
@@ -71,29 +89,12 @@ impl<TServerRequest: ByteConverter> ByteConverter for ServerRequest<TServerReque
         match self {
             Self::SendMessage {
                 server_request,
-                bytecon_type_name
             } => {
                 // byte
                 0u8.append_to_bytes(bytes)?;
 
                 // TServerRequest
                 server_request.append_to_bytes(bytes)?;
-
-                // string
-                bytecon_type_name.append_to_bytes(bytes)?;
-            },
-            Self::RequestPublicKey {
-                client_public_key_bytes,
-                signed_payload,
-            } => {
-                // byte
-                1u8.append_to_bytes(bytes)?;
-
-                // vec<u8>
-                client_public_key_bytes.append_to_bytes(bytes)?;
-
-                // vec<u8>
-                signed_payload.append_to_bytes(bytes)?;
             },
         }
 
@@ -106,13 +107,6 @@ impl<TServerRequest: ByteConverter> ByteConverter for ServerRequest<TServerReque
             0 => {
                 Ok(Self::SendMessage {
                     server_request: TServerRequest::extract_from_bytes(bytes, index)?,
-                    bytecon_type_name: String::extract_from_bytes(bytes, index)?,
-                })
-            },
-            1 => {
-                Ok(Self::RequestPublicKey {
-                    client_public_key_bytes: Vec::<u8>::extract_from_bytes(bytes, index)?,
-                    signed_payload: Vec::<u8>::extract_from_bytes(bytes, index)?,
                 })
             },
             _ => {
@@ -125,12 +119,10 @@ impl<TServerRequest: ByteConverter> ByteConverter for ServerRequest<TServerReque
     }
 }
 
+#[derive(Debug)]
 enum ServerResponse<TServerResponse: ByteConverter> {
     SentMessage {
         server_response: TServerResponse,
-    },
-    SendPublicKey {
-        public_key_bytes: Vec<u8>,
     },
 }
 
@@ -146,15 +138,6 @@ impl<TServerResponse: ByteConverter> ByteConverter for ServerResponse<TServerRes
                 // TServerResponse
                 server_response.append_to_bytes(bytes)?;
             },
-            Self::SendPublicKey {
-                public_key_bytes
-            } => {
-                // byte
-                1u8.append_to_bytes(bytes)?;
-
-                // vec<u8>
-                public_key_bytes.append_to_bytes(bytes)?;
-            },
         }
 
         Ok(())
@@ -168,11 +151,6 @@ impl<TServerResponse: ByteConverter> ByteConverter for ServerResponse<TServerRes
                     server_response: TServerResponse::extract_from_bytes(bytes, index)?,
                 })
             },
-            1 => {
-                Ok(Self::SendPublicKey {
-                    public_key_bytes: Vec::<u8>::extract_from_bytes(bytes, index)?,
-                })
-            },
             _ => {
                 Err(ServerClientByteConError::UnexpectedEnumVariantByte {
                     enum_variant_byte,
@@ -183,7 +161,7 @@ impl<TServerResponse: ByteConverter> ByteConverter for ServerResponse<TServerRes
     }
 }
 
-pub struct Server<TMessageProcessor>
+pub struct ByteConServer<TMessageProcessor>
 where
     TMessageProcessor: MessageProcessor + Send + Sync + 'static,
     TMessageProcessor::TInput: Send + Sync + 'static,
@@ -191,29 +169,56 @@ where
 {
     bind_address: String,
     bind_port: u16,
-    //public_key_file_path: PathBuf,  // TODO may need to store the actual tempfile instance
-    //private_key_file_path: PathBuf,
+    public_key_file_path: PathBuf,
+    private_key_file_path: PathBuf,
     message_processor: Arc<TMessageProcessor>,
 }
 
-impl<TMessageProcessor> Server<TMessageProcessor>
+impl<TMessageProcessor> ByteConServer<TMessageProcessor>
 where
     TMessageProcessor: MessageProcessor + Send + Sync + 'static,
     TMessageProcessor::TInput: Send + Sync + 'static,
     TMessageProcessor::TOutput: Send + Sync + 'static,
 {
-    pub fn new(bind_address: String, bind_port: u16, message_processor: Arc<TMessageProcessor>) -> Self {
-        //todo!("Create public and private key temp files.");
+    pub fn new(
+        bind_address: String,
+        bind_port: u16,
+        public_key_file_path: PathBuf,
+        private_key_file_path: PathBuf,
+        message_processor: Arc<TMessageProcessor>
+    ) -> Self {
         Self {
             bind_address,
             bind_port,
-            //public_key_file_path,
-            //private_key_file_path,
+            public_key_file_path,
+            private_key_file_path,
             message_processor,
         }
     }
     pub async fn start(&self) -> Result<(), Box<dyn Error>> {
-        //todo!("Bind to address and spawn tokio thread to handle requests.")
+        let certs = {
+            let cert_file = std::fs::File::open(&self.public_key_file_path)?;
+            let mut reader = std::io::BufReader::new(cert_file);
+            let certs = rustls_pemfile::certs(&mut reader)?
+                .into_iter()
+                .map(Certificate)
+                .collect();
+            certs
+        };
+
+        let key = {
+            let key_file = std::fs::File::open(&self.private_key_file_path)?;
+            let mut reader = std::io::BufReader::new(key_file);
+            let keys = rustls_pemfile::pkcs8_private_keys(&mut reader)?;
+            PrivateKey(keys[0].clone())
+        };
+
+        // configure the TLS server
+        let tls_config = ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)?;
+        let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
         let listening_address = format!("{}:{}", self.bind_address, self.bind_port);
         println!("Server binding to address {}", listening_address);
@@ -223,12 +228,13 @@ where
         loop {
             let (tcp_stream, client_address) = listener.accept()
                 .await?;
+            let tls_acceptor = tls_acceptor.clone();
             let message_processor = self.message_processor.clone();
 
             let _process_task = tokio::spawn(async move {
-                match Server::<TMessageProcessor>::process_tcp_stream(tcp_stream, client_address, message_processor).await {
+                match ByteConServer::<TMessageProcessor>::process_tcp_stream(tls_acceptor, tcp_stream, client_address, message_processor).await {
                     Ok(_) => {
-                        println!("{}: processed request from client {}.", chrono::Utc::now(), client_address);
+                        println!("{}: successfully processed request from client {}.", chrono::Utc::now(), client_address);
                     },
                     Err(error) => {
                         eprintln!("{}: failed to fully process request from client {} with error {:?}", chrono::Utc::now(), client_address, error);
@@ -237,17 +243,36 @@ where
             });
         }
     }
-    async fn process_tcp_stream(mut tcp_stream: TcpStream, client_address: SocketAddr, message_processor: Arc<TMessageProcessor>) -> Result<(), Box<dyn Error>> {
-        println!("{}: reading request from client {}.", chrono::Utc::now(), client_address);
-        let message = tcp_stream.read_to_byte_converter::<TMessageProcessor::TInput>()
-            .await?;
-        println!("{}: processing request from client {}.", chrono::Utc::now(), client_address);
-        let response = message_processor.process_message(&message)
-            .await?;
-        println!("{}: writing response to client {}.", chrono::Utc::now(), client_address);
-        tcp_stream.write_from_byte_converter(&response)
-            .await?;
-        Ok(())
+    async fn process_tcp_stream(tls_acceptor: TlsAcceptor, tcp_stream: TcpStream, client_address: SocketAddr, message_processor: Arc<TMessageProcessor>) -> Result<(), Box<dyn Error>> {
+        println!("{}: accepting TLS stream from client {}.", chrono::Utc::now(), client_address);
+        match tls_acceptor.accept(tcp_stream).await {
+            Ok(tls_stream) => {
+                let mut tls_stream = TlsStream::Server(tls_stream);
+
+                println!("{}: reading request from client {}.", chrono::Utc::now(), client_address);
+                let server_request = tls_stream.read_to_byte_converter::<ServerRequest<TMessageProcessor::TInput>>()
+                    .await?;
+                match server_request {
+                    ServerRequest::SendMessage {
+                        server_request,
+                    } => {
+                        println!("{}: processing message from client {}.", chrono::Utc::now(), client_address);
+                        let server_response = message_processor.process_message(&server_request)
+                            .await?;
+                        println!("{}: writing response to client {}.", chrono::Utc::now(), client_address);
+                        tls_stream.write_from_byte_converter(&ServerResponse::SentMessage {
+                            server_response,
+                        })
+                            .await?;
+                    },
+                }
+                Ok(())
+            },
+            Err(e) => {
+                eprintln!("{}: failed to accept TLS connection from client {} with error {:?}.", chrono::Utc::now(), client_address, e);
+                Err(e.into())
+            },
+        }
     }
 }
 
@@ -264,5 +289,10 @@ enum ServerClientByteConError {
     UnexpectedEnumVariantByte {
         enum_variant_byte: u8,
         enum_variant_name: String,
+    },
+    #[error("Unexpected server response {server_response} given initial server request {server_request}.")]
+    UnexpectedServerResponse {
+        server_response: String,
+        server_request: String,
     },
 }
