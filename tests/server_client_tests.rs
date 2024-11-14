@@ -58,6 +58,7 @@ mod server_client_tests {
 
         let server_address = String::from("localhost");
         let server_port = 8080;
+        let server_domain = String::from("localhost");
 
         let mut server_public_key_tempfile = tempfile::NamedTempFile::new().unwrap();
         println!("public key: {:?}", server_public_key_tempfile.path());
@@ -67,7 +68,7 @@ mod server_client_tests {
 
         // generate self-signed keys
         let (public_key_bytes, private_key_bytes) = {
-            let CertifiedKey { cert, key_pair } = generate_simple_self_signed(vec![String::from("localhost")])
+            let CertifiedKey { cert, key_pair } = generate_simple_self_signed(vec![server_domain.clone()])
                 .expect("Failed to generate self-signed cert.");
 
             let cert_pem = cert.pem();
@@ -122,7 +123,7 @@ mod server_client_tests {
             server_address,
             server_port,
             server_public_key_tempfile.path().into(),
-            String::from("localhost"),
+            server_domain,
         );
 
         let mut random = rand::rngs::StdRng::from_entropy();
