@@ -10,6 +10,7 @@ pub struct ByteConClient<TRequest: ByteConverter, TResponse: ByteConverter> {
     server_domain: String,
     phantom_request: PhantomData<TRequest>,
     phantom_response: PhantomData<TResponse>,
+    // TODO keep long-lived connection open instead of open-closing per function call
 }
 
 impl<TRequest: ByteConverter, TResponse: ByteConverter> ByteConClient<TRequest, TResponse> {
