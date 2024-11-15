@@ -10,6 +10,7 @@ mod server_client_tests {
 
     struct EchoMessageProcessor;
 
+    #[derive(Clone)]
     struct EchoRequest {
         message: String,
     }
@@ -131,7 +132,7 @@ mod server_client_tests {
         for _ in 0..100 {
             let random_number: u128 = random.gen();
             let message = String::from(format!("{}", random_number));
-            let response = client.send_message(EchoRequest {
+            let response = client.send_message(&EchoRequest {
                 message: message.clone(),
             })
                 .await
