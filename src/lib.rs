@@ -459,6 +459,31 @@ where
     }
 }
 
+impl<TMessageProcessor> ByteConverter for ByteConServer<TMessageProcessor>
+where
+    TMessageProcessor: MessageProcessor + Send + Sync + 'static + ByteConverter,
+    TMessageProcessor::TInput: Send + Sync + 'static,
+    TMessageProcessor::TOutput: Send + Sync + 'static,
+{
+    fn append_to_bytes(&self, bytes: &mut Vec<u8>) -> Result<(), Box<dyn Error>> {
+        self.bind_address.append_to_bytes(bytes)?;
+        self.bind_port.append_to_bytes(bytes)?;
+        self.public_key.append_to_bytes(bytes)?;
+        self.private_key.append_to_bytes(bytes)?;
+        self.message_processor.append_to_bytes(bytes)?;
+        Ok(())
+    }
+    fn extract_from_bytes(bytes: &Vec<u8>, index: &mut usize) -> Result<Self, Box<dyn Error>> where Self: Sized {
+        Ok(Self {
+            bind_address: String::extract_from_bytes(bytes, index)?,
+            bind_port: u16::extract_from_bytes(bytes, index)?,
+            public_key: ByteConPublicKey::extract_from_bytes(bytes, index)?,
+            private_key: ByteConPrivateKey::extract_from_bytes(bytes, index)?,
+            message_processor: Arc::new(TMessageProcessor::extract_from_bytes(bytes, index)?),
+        })
+    }
+}
+
 pub trait MessageProcessor {
     type TInput: ByteConverter;
     type TOutput: ByteConverter;
