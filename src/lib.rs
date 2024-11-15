@@ -1,4 +1,4 @@
-use std::{borrow::Cow, error::Error, future::Future, marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{error::Error, future::Future, marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc};
 use bytecon::{ByteConverter, ByteStreamReaderAsync, ByteStreamWriterAsync};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{rustls::{Certificate, ClientConfig, PrivateKey, RootCertStore, ServerConfig, ServerName}, TlsAcceptor, TlsConnector, TlsStream};
@@ -12,7 +12,7 @@ pub struct ByteConClient<TRequest: ByteConverter, TResponse: ByteConverter> {
     phantom_response: PhantomData<TResponse>,
 }
 
-impl<TRequest: ByteConverter + Clone, TResponse: ByteConverter> ByteConClient<TRequest, TResponse> {
+impl<TRequest: ByteConverter, TResponse: ByteConverter> ByteConClient<TRequest, TResponse> {
     pub fn new(server_address: String, server_port: u16, server_public_key_file_path: PathBuf, server_domain: String) -> Self {
         Self {
             server_address,
@@ -53,7 +53,7 @@ impl<TRequest: ByteConverter + Clone, TResponse: ByteConverter> ByteConClient<TR
     }
     pub async fn send_message(&self, message: &TRequest) -> Result<TResponse, Box<dyn Error>> {
         let server_request = ServerRequest::SendMessage {
-            server_request: Cow::Borrowed(message),
+            server_request: ClonelessCow::Borrowed(message),
         };
         let mut tls_stream = self.connect()
             .await?;
@@ -77,14 +77,31 @@ impl<TRequest: ByteConverter + Clone, TResponse: ByteConverter> ByteConClient<TR
     }
 }
 
-#[derive(Debug)]
-enum ServerRequest<'a, TServerRequest: ByteConverter + Clone> {
+// TODO move to its own crate
+enum ClonelessCow<'a, T>
+where
+    T: 'a,
+{
+    Borrowed(&'a T),
+    Owned(T),
+}
+
+impl<'a, T> AsRef<T> for ClonelessCow<'a, T> {
+    fn as_ref(&self) -> &T {
+        match self {
+            ClonelessCow::Borrowed(borrowed) => borrowed,
+            ClonelessCow::Owned(owned) => owned,
+        }
+    }
+}
+
+enum ServerRequest<'a, TServerRequest: ByteConverter> {
     SendMessage {
-        server_request: Cow<'a, TServerRequest>,
+        server_request: ClonelessCow<'a, TServerRequest>,
     },
 }
 
-impl<'a, TServerRequest: ByteConverter + Clone> ByteConverter for ServerRequest<'a, TServerRequest> {
+impl<'a, TServerRequest: ByteConverter> ByteConverter for ServerRequest<'a, TServerRequest> {
     fn append_to_bytes(&self, bytes: &mut Vec<u8>) -> Result<(), Box<dyn Error>> {
         match self {
             Self::SendMessage {
@@ -94,7 +111,7 @@ impl<'a, TServerRequest: ByteConverter + Clone> ByteConverter for ServerRequest<
                 0u8.append_to_bytes(bytes)?;
 
                 // TServerRequest
-                server_request.append_to_bytes(bytes)?;
+                server_request.as_ref().append_to_bytes(bytes)?;
             },
         }
 
@@ -106,7 +123,7 @@ impl<'a, TServerRequest: ByteConverter + Clone> ByteConverter for ServerRequest<
         match enum_variant_byte {
             0 => {
                 Ok(Self::SendMessage {
-                    server_request: Cow::Owned(TServerRequest::extract_from_bytes(bytes, index)?),
+                    server_request: ClonelessCow::Owned(TServerRequest::extract_from_bytes(bytes, index)?),
                 })
             },
             _ => {
@@ -119,7 +136,6 @@ impl<'a, TServerRequest: ByteConverter + Clone> ByteConverter for ServerRequest<
     }
 }
 
-#[derive(Debug)]
 enum ServerResponse<TServerResponse: ByteConverter> {
     SentMessage {
         server_response: TServerResponse,
@@ -164,7 +180,7 @@ impl<TServerResponse: ByteConverter> ByteConverter for ServerResponse<TServerRes
 pub struct ByteConServer<TMessageProcessor>
 where
     TMessageProcessor: MessageProcessor + Send + Sync + 'static,
-    TMessageProcessor::TInput: Send + Sync + 'static + Clone,
+    TMessageProcessor::TInput: Send + Sync + 'static,
     TMessageProcessor::TOutput: Send + Sync + 'static,
 {
     bind_address: String,
@@ -177,7 +193,7 @@ where
 impl<TMessageProcessor> ByteConServer<TMessageProcessor>
 where
     TMessageProcessor: MessageProcessor + Send + Sync + 'static,
-    TMessageProcessor::TInput: Send + Sync + 'static + Clone,
+    TMessageProcessor::TInput: Send + Sync + 'static,
     TMessageProcessor::TOutput: Send + Sync + 'static,
 {
     pub fn new(
@@ -257,7 +273,7 @@ where
                         server_request,
                     } => {
                         println!("{}: processing message from client {}.", chrono::Utc::now(), client_address);
-                        let server_response = message_processor.process_message(&server_request)
+                        let server_response = message_processor.process_message(server_request.as_ref())
                             .await?;
                         println!("{}: writing response to client {}.", chrono::Utc::now(), client_address);
                         tls_stream.write_from_byte_converter(&ServerResponse::SentMessage {

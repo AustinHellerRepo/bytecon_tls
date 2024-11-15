@@ -10,9 +10,14 @@ mod server_client_tests {
 
     struct EchoMessageProcessor;
 
-    #[derive(Clone)]
     struct EchoRequest {
         message: String,
+    }
+
+    impl Clone for EchoRequest {
+        fn clone(&self) -> Self {
+            panic!("This should not require cloning.")
+        }
     }
 
     impl ByteConverter for EchoRequest {
