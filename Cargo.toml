@@ -11,6 +11,7 @@ rustls = { version = "0.21" }
 rustls-pemfile = { version = "1.0" }
 thiserror = { version = "1" }
 chrono = { version = "0.4" }
+cloneless_cow = { version = "0.1" }
 
 [dev-dependencies]
 tempfile = { version = "3" }

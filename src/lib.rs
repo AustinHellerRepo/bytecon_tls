@@ -1,5 +1,6 @@
 use std::{error::Error, future::Future, marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc};
 use bytecon::{ByteConverter, ByteStreamReaderAsync, ByteStreamWriterAsync};
+use cloneless_cow::ClonelessCow;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{rustls::{Certificate, ClientConfig, PrivateKey, RootCertStore, ServerConfig, ServerName}, TlsAcceptor, TlsConnector, TlsStream};
 
@@ -67,30 +68,13 @@ impl<TRequest: ByteConverter, TResponse: ByteConverter> ByteConClient<TRequest, 
             } => {
                 Ok(server_response)
             },
+            #[allow(unreachable_patterns)]
             _ => {
                 Err(ServerClientByteConError::UnexpectedServerResponse {
                     server_request: String::from(std::any::type_name::<TRequest>()),
                     server_response: String::from(std::any::type_name::<TResponse>()),
                 }.into())
             }
-        }
-    }
-}
-
-// TODO move to its own crate
-enum ClonelessCow<'a, T>
-where
-    T: 'a,
-{
-    Borrowed(&'a T),
-    Owned(T),
-}
-
-impl<'a, T> AsRef<T> for ClonelessCow<'a, T> {
-    fn as_ref(&self) -> &T {
-        match self {
-            ClonelessCow::Borrowed(borrowed) => borrowed,
-            ClonelessCow::Owned(owned) => owned,
         }
     }
 }
