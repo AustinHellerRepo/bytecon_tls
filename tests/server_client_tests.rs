@@ -5,7 +5,7 @@ mod server_client_tests {
     use bytecon::ByteConverter;
     use rand::{Rng, SeedableRng};
     use rcgen::{generate_simple_self_signed, CertifiedKey};
-    use server_client_bytecon::{ByteConClient, ByteConServer, MessageProcessor};
+    use server_client_bytecon::{ByteConCertificate, ByteConClient, ByteConPrivateKey, ByteConPublicKey, ByteConServer, MessageProcessor};
     use tokio::{sync::Mutex, time::sleep};
 
     struct EchoMessageProcessor;
@@ -99,8 +99,8 @@ mod server_client_tests {
                     let server = ByteConServer::new(
                         server_address,
                         server_port,
-                        server_public_key_file_path,
-                        server_private_key_file_path,
+                        ByteConPublicKey::new(ByteConCertificate::FilePath(server_public_key_file_path)),
+                        ByteConPrivateKey::new(ByteConCertificate::FilePath(server_private_key_file_path)),
                         Arc::new(EchoMessageProcessor),
                     );
                     let start_result = server.start()
@@ -128,7 +128,7 @@ mod server_client_tests {
         let client = ByteConClient::<EchoRequest, EchoResponse>::new(
             server_address,
             server_port,
-            server_public_key_tempfile.path().into(),
+            ByteConPublicKey::new(ByteConCertificate::FilePath(server_public_key_tempfile.path().into())),
             server_domain,
         );
 
