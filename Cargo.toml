@@ -2,6 +2,13 @@
 name = "server_client_bytecon"
 version = "0.1.0"
 edition = "2021"
+authors = ["Austin Heller"]
+description = "A library for sending ByteConverter implementations over TLS from clients to a server."
+readme = "README.md"
+repository = "https://github.com/AustinHellerRepo/bytecon_tls"
+license = "MIT OR Apache-2.0"
+keywords = ["networking", "trait", "async", "client", "server"]
+categories = ["network-programming"]
 
 [dependencies]
 bytecon = { version = "0.1", features = ["tokio"] }
