@@ -91,6 +91,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "bytecon_tls"
+version = "0.1.0"
+dependencies = [
+ "bytecon",
+ "chrono",
+ "cloneless_cow",
+ "rand",
+ "rcgen",
+ "rustls 0.21.12",
+ "rustls-pemfile",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-rustls",
+]
+
+[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -570,23 +587,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "server_client_bytecon"
-version = "0.1.0"
-dependencies = [
- "bytecon",
- "chrono",
- "cloneless_cow",
- "rand",
- "rcgen",
- "rustls 0.21.12",
- "rustls-pemfile",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tokio-rustls",
 ]
 
 [[package]]

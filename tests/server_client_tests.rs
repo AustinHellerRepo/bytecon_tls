@@ -5,7 +5,7 @@ mod server_client_tests {
     use bytecon::ByteConverter;
     use rand::{Rng, SeedableRng};
     use rcgen::{generate_simple_self_signed, CertifiedKey};
-    use server_client_bytecon::{ByteConCertificate, ByteConClient, ByteConPrivateKey, ByteConPublicKey, ByteConServer, MessageProcessor};
+    use bytecon_tls::{ByteConCertificate, ByteConClient, ByteConPrivateKey, ByteConPublicKey, ByteConServer, MessageProcessor};
     use tokio::{sync::Mutex, time::sleep};
 
     struct EchoMessageProcessor;
