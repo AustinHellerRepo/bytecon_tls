@@ -1,6 +1,6 @@
 [package]
 name = "bytecon_tls"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Austin Heller"]
 description = "A library for sending ByteConverter implementations over TLS from clients to a server."
@@ -19,6 +19,7 @@ rustls-pemfile = { version = "1.0" }
 thiserror = { version = "1" }
 chrono = { version = "0.4" }
 cloneless_cow = { version = "0.1" }
+base64 = { version = "0.22" }
 
 [dev-dependencies]
 tempfile = { version = "3" }

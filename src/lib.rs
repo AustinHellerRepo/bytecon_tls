@@ -1,4 +1,5 @@
 use std::{error::Error, fs::File, future::Future, io::{Read, Seek, SeekFrom, Write}, marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc};
+use base64::Engine;
 use bytecon::{ByteConverter, ByteStreamReaderAsync, ByteStreamWriterAsync};
 use cloneless_cow::ClonelessCow;
 use tokio::net::{TcpListener, TcpStream};
@@ -107,6 +108,92 @@ where
 pub enum ByteConCertificate {
     FilePath(PathBuf),
     RawCertsBytes(Vec<Vec<u8>>),
+    Base64(String),  // TODO implement
+}
+
+impl ByteConCertificate {
+    pub fn as_raw_certs_bytes_variant(&self) -> Result<Self, Box<dyn Error>> {
+        match self {
+            Self::FilePath(file_path) => {
+                let cert_file = std::fs::File::open(file_path)?;
+                let mut reader = std::io::BufReader::new(cert_file);
+                let cert_bytes = rustls_pemfile::certs(&mut reader)?;
+                Ok(Self::RawCertsBytes(cert_bytes))
+            },
+            Self::RawCertsBytes(bytes) => {
+                Ok(Self::RawCertsBytes(bytes.clone()))
+            },
+            Self::Base64(base64_string) => {
+                let base64_bytes = base64::engine::general_purpose::STANDARD.decode(&base64_string)?;
+                let mut index = 0;
+                let cert_bytes = Vec::<Vec<u8>>::extract_from_bytes(&base64_bytes, &mut index)?;
+                Ok(Self::RawCertsBytes(cert_bytes))
+            },
+        }
+    }
+    pub fn as_base64_variant(&self) -> Result<Self, Box<dyn Error>> {
+        match self {
+            Self::FilePath(file_path) => {
+                let cert_file = std::fs::File::open(file_path)?;
+                let mut reader = std::io::BufReader::new(cert_file);
+                let cert_bytes = rustls_pemfile::certs(&mut reader)?;
+                let bytecon_bytes = cert_bytes.to_vec_bytes()?;
+                let base64_string = base64::engine::general_purpose::STANDARD.encode(&bytecon_bytes);
+                Ok(Self::Base64(base64_string))
+            },
+            Self::RawCertsBytes(bytes) => {
+                let bytecon_bytes = bytes.to_vec_bytes()?;
+                let base64_string = base64::engine::general_purpose::STANDARD.encode(&bytecon_bytes);
+                Ok(Self::Base64(base64_string))
+            },
+            Self::Base64(base64_string) => {
+                Ok(Self::Base64(base64_string.clone()))
+            },
+        }
+    }
+    pub fn as_file_path_variant(&self, file_path: PathBuf) -> Result<Self, Box<dyn Error>> {
+        match self {
+            Self::FilePath(current_file_path) => {
+                std::fs::copy(&current_file_path, &file_path)?;
+                Ok(Self::FilePath(file_path))
+            },
+            Self::RawCertsBytes(bytes) => {
+                let mut file = File::create(file_path.clone())?;
+                let mut pem_data = Vec::new();
+                for cert_bytes in bytes {
+                    let encoded_cert_bytes = base64::engine::general_purpose::STANDARD.encode(cert_bytes);
+                    pem_data.extend_from_slice(b"-----BEGIN CERTIFICATE-----\n");
+                    for chunk in encoded_cert_bytes.as_bytes().chunks(64) {
+                        pem_data.extend_from_slice(chunk);
+                        pem_data.push(b'\n');
+                    }
+                    pem_data.extend_from_slice(b"-----END CERTIFICATE-----\n");
+                }
+                file.write_all(&pem_data)?;
+                file.flush()?;
+                Ok(Self::FilePath(file_path))
+            },
+            Self::Base64(base64_string) => {
+                let base64_bytes = base64::engine::general_purpose::STANDARD.decode(&base64_string)?;
+                let mut index = 0;
+                let bytes = Vec::<Vec<u8>>::extract_from_bytes(&base64_bytes, &mut index)?;
+                let mut file = File::create(file_path.clone())?;
+                let mut pem_data = Vec::new();
+                for cert_bytes in bytes {
+                    let encoded_cert_bytes = base64::engine::general_purpose::STANDARD.encode(cert_bytes);
+                    pem_data.extend_from_slice(b"-----BEGIN CERTIFICATE-----\n");
+                    for chunk in encoded_cert_bytes.as_bytes().chunks(64) {
+                        pem_data.extend_from_slice(chunk);
+                        pem_data.push(b'\n');
+                    }
+                    pem_data.extend_from_slice(b"-----END CERTIFICATE-----\n");
+                }
+                file.write_all(&pem_data)?;
+                file.flush()?;
+                Ok(Self::FilePath(file_path))
+            }
+        }
+    }
 }
 
 impl ByteConverter for ByteConCertificate {
@@ -135,8 +222,6 @@ impl ByteConverter for ByteConCertificate {
                     file_bytes
                 };
                 server_public_key_file_bytes.append_to_bytes(bytes)?;
-
-                Ok(())
             },
             Self::RawCertsBytes(raw_certs_bytes) => {
                 // u8
@@ -144,10 +229,16 @@ impl ByteConverter for ByteConCertificate {
 
                 // Vec<Vec<u8>>
                 raw_certs_bytes.append_to_bytes(bytes)?;
+            },
+            Self::Base64(base64_string) => {
+                // u8
+                2u8.append_to_bytes(bytes)?;
 
-                Ok(())
+                // String
+                base64_string.append_to_bytes(bytes)?;
             },
         }
+        Ok(())
     }
     fn extract_from_bytes(bytes: &Vec<u8>, index: &mut usize) -> Result<Self, Box<dyn Error>> where Self: Sized {
         let enum_variant_byte = u8::extract_from_bytes(bytes, index)?;
@@ -168,6 +259,9 @@ impl ByteConverter for ByteConCertificate {
             },
             1 => {
                 Ok(Self::RawCertsBytes(Vec::<Vec<u8>>::extract_from_bytes(bytes, index)?))
+            },
+            2 => {
+                Ok(Self::Base64(String::extract_from_bytes(bytes, index)?))
             },
             _ => {
                 Err(ServerClientByteConError::UnexpectedEnumVariantByte {
@@ -194,7 +288,8 @@ impl ByteConPublicKey {
             ByteConCertificate::FilePath(file_path) => {
                 let cert_file = std::fs::File::open(file_path)?;
                 let mut reader = std::io::BufReader::new(cert_file);
-                let certs = rustls_pemfile::certs(&mut reader)?
+                let cert_bytes = rustls_pemfile::certs(&mut reader)?;
+                let certs = cert_bytes
                     .into_iter()
                     .map(Certificate)
                     .collect();
@@ -202,6 +297,18 @@ impl ByteConPublicKey {
             },
             ByteConCertificate::RawCertsBytes(bytes) => {
                 let certs = bytes
+                    .into_iter()
+                    .map(|item| {
+                        Certificate(item.clone())
+                    })
+                    .collect();
+                Ok(certs)
+            },
+            ByteConCertificate::Base64(base64_string) => {
+                let base64_bytes = base64::engine::general_purpose::STANDARD.decode(&base64_string)?;
+                let mut index = 0;
+                let cert_bytes = Vec::<Vec<u8>>::extract_from_bytes(&base64_bytes, &mut index)?;
+                let certs = cert_bytes
                     .into_iter()
                     .map(|item| {
                         Certificate(item.clone())
@@ -245,6 +352,12 @@ impl ByteConPrivateKey {
             },
             ByteConCertificate::RawCertsBytes(bytes) => {
                 Ok(PrivateKey(bytes[0].clone()))
+            },
+            ByteConCertificate::Base64(base64_string) => {
+                let base64_bytes = base64::engine::general_purpose::STANDARD.decode(&base64_string)?;
+                let mut index = 0;
+                let keys = Vec::<Vec<u8>>::extract_from_bytes(&base64_bytes, &mut index)?;
+                Ok(PrivateKey(keys[0].clone()))
             },
         }
     }

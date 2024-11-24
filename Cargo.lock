@@ -92,8 +92,9 @@ dependencies = [
 
 [[package]]
 name = "bytecon_tls"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
+ "base64 0.22.1",
  "bytecon",
  "chrono",
  "cloneless_cow",
