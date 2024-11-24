@@ -111,47 +111,14 @@ pub enum ByteConCertificate {
     Base64(String),  // TODO implement
 }
 
-impl ByteConCertificate {
-    pub fn as_raw_certs_bytes_variant(&self) -> Result<Self, Box<dyn Error>> {
-        match self {
-            Self::FilePath(file_path) => {
-                let cert_file = std::fs::File::open(file_path)?;
-                let mut reader = std::io::BufReader::new(cert_file);
-                let cert_bytes = rustls_pemfile::certs(&mut reader)?;
-                Ok(Self::RawCertsBytes(cert_bytes))
-            },
-            Self::RawCertsBytes(bytes) => {
-                Ok(Self::RawCertsBytes(bytes.clone()))
-            },
-            Self::Base64(base64_string) => {
-                let base64_bytes = base64::engine::general_purpose::STANDARD.decode(&base64_string)?;
-                let mut index = 0;
-                let cert_bytes = Vec::<Vec<u8>>::extract_from_bytes(&base64_bytes, &mut index)?;
-                Ok(Self::RawCertsBytes(cert_bytes))
-            },
-        }
-    }
-    pub fn as_base64_variant(&self) -> Result<Self, Box<dyn Error>> {
-        match self {
-            Self::FilePath(file_path) => {
-                let cert_file = std::fs::File::open(file_path)?;
-                let mut reader = std::io::BufReader::new(cert_file);
-                let cert_bytes = rustls_pemfile::certs(&mut reader)?;
-                let bytecon_bytes = cert_bytes.to_vec_bytes()?;
-                let base64_string = base64::engine::general_purpose::STANDARD.encode(&bytecon_bytes);
-                Ok(Self::Base64(base64_string))
-            },
-            Self::RawCertsBytes(bytes) => {
-                let bytecon_bytes = bytes.to_vec_bytes()?;
-                let base64_string = base64::engine::general_purpose::STANDARD.encode(&bytecon_bytes);
-                Ok(Self::Base64(base64_string))
-            },
-            Self::Base64(base64_string) => {
-                Ok(Self::Base64(base64_string.clone()))
-            },
-        }
-    }
-    pub fn as_file_path_variant(&self, file_path: PathBuf) -> Result<Self, Box<dyn Error>> {
+pub trait AsByteConCertificate {
+    fn as_file_path_variant(&self, file_path: PathBuf) -> Result<Self, Box<dyn Error>> where Self: Sized;
+    fn as_raw_certs_bytes_variant(&self) -> Result<Self, Box<dyn Error>> where Self: Sized;
+    fn as_base64_variant(&self) -> Result<Self, Box<dyn Error>> where Self: Sized;
+}
+
+impl AsByteConCertificate for ByteConCertificate {
+    fn as_file_path_variant(&self, file_path: PathBuf) -> Result<Self, Box<dyn Error>> {
         match self {
             Self::FilePath(current_file_path) => {
                 std::fs::copy(&current_file_path, &file_path)?;
@@ -192,6 +159,45 @@ impl ByteConCertificate {
                 file.flush()?;
                 Ok(Self::FilePath(file_path))
             }
+        }
+    }
+    fn as_raw_certs_bytes_variant(&self) -> Result<Self, Box<dyn Error>> {
+        match self {
+            Self::FilePath(file_path) => {
+                let cert_file = std::fs::File::open(file_path)?;
+                let mut reader = std::io::BufReader::new(cert_file);
+                let cert_bytes = rustls_pemfile::certs(&mut reader)?;
+                Ok(Self::RawCertsBytes(cert_bytes))
+            },
+            Self::RawCertsBytes(bytes) => {
+                Ok(Self::RawCertsBytes(bytes.clone()))
+            },
+            Self::Base64(base64_string) => {
+                let base64_bytes = base64::engine::general_purpose::STANDARD.decode(&base64_string)?;
+                let mut index = 0;
+                let cert_bytes = Vec::<Vec<u8>>::extract_from_bytes(&base64_bytes, &mut index)?;
+                Ok(Self::RawCertsBytes(cert_bytes))
+            },
+        }
+    }
+    fn as_base64_variant(&self) -> Result<Self, Box<dyn Error>> {
+        match self {
+            Self::FilePath(file_path) => {
+                let cert_file = std::fs::File::open(file_path)?;
+                let mut reader = std::io::BufReader::new(cert_file);
+                let cert_bytes = rustls_pemfile::certs(&mut reader)?;
+                let bytecon_bytes = cert_bytes.to_vec_bytes()?;
+                let base64_string = base64::engine::general_purpose::STANDARD.encode(&bytecon_bytes);
+                Ok(Self::Base64(base64_string))
+            },
+            Self::RawCertsBytes(bytes) => {
+                let bytecon_bytes = bytes.to_vec_bytes()?;
+                let base64_string = base64::engine::general_purpose::STANDARD.encode(&bytecon_bytes);
+                Ok(Self::Base64(base64_string))
+            },
+            Self::Base64(base64_string) => {
+                Ok(Self::Base64(base64_string.clone()))
+            },
         }
     }
 }
@@ -320,6 +326,24 @@ impl ByteConPublicKey {
     }
 }
 
+impl AsByteConCertificate for ByteConPublicKey {
+    fn as_file_path_variant(&self, file_path: PathBuf) -> Result<Self, Box<dyn Error>> where Self: Sized {
+        Ok(ByteConPublicKey::new(
+            self.certificate.as_file_path_variant(file_path)?,
+        ))
+    }
+    fn as_raw_certs_bytes_variant(&self) -> Result<Self, Box<dyn Error>> where Self: Sized {
+        Ok(ByteConPublicKey::new(
+            self.certificate.as_raw_certs_bytes_variant()?,
+        ))
+    }
+    fn as_base64_variant(&self) -> Result<Self, Box<dyn Error>> where Self: Sized {
+        Ok(ByteConPublicKey::new(
+            self.certificate.as_base64_variant()?,
+        ))
+    }
+}
+
 impl ByteConverter for ByteConPublicKey {
     fn append_to_bytes(&self, bytes: &mut Vec<u8>) -> Result<(), Box<dyn Error>> {
         self.certificate.append_to_bytes(bytes)?;
@@ -360,6 +384,24 @@ impl ByteConPrivateKey {
                 Ok(PrivateKey(keys[0].clone()))
             },
         }
+    }
+}
+
+impl AsByteConCertificate for ByteConPrivateKey {
+    fn as_file_path_variant(&self, file_path: PathBuf) -> Result<Self, Box<dyn Error>> where Self: Sized {
+        Ok(ByteConPrivateKey::new(
+            self.certificate.as_file_path_variant(file_path)?,
+        ))
+    }
+    fn as_raw_certs_bytes_variant(&self) -> Result<Self, Box<dyn Error>> where Self: Sized {
+        Ok(ByteConPrivateKey::new(
+            self.certificate.as_raw_certs_bytes_variant()?,
+        ))
+    }
+    fn as_base64_variant(&self) -> Result<Self, Box<dyn Error>> where Self: Sized {
+        Ok(ByteConPrivateKey::new(
+            self.certificate.as_base64_variant()?,
+        ))
     }
 }
 

@@ -2,7 +2,7 @@
 mod bytecon_certificate_tests {
     use std::io::Write;
 
-    use bytecon_tls::{ByteConCertificate, ByteConPublicKey};
+    use bytecon_tls::{AsByteConCertificate, ByteConCertificate, ByteConPublicKey};
     use rcgen::{generate_simple_self_signed, CertifiedKey};
 
 
